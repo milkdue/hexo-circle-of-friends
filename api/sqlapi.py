@@ -11,6 +11,7 @@ from sqlalchemy import create_engine
 from hexo_circle_of_friends.models import Friend, Post
 from sqlalchemy.orm import sessionmaker, scoped_session
 from sqlalchemy.sql.expression import desc, func
+from hexo_circle_of_friends.utils.process_time import time_compare
 
 
 def db_init():
@@ -97,40 +98,55 @@ def query_friend():
     return friend_list_json
 
 
-def query_random_friend():
+def query_random_friend(num):
+    if num < 1:
+        return {"message": "param 'num' error"}
     session = db_init()
-    data: Friend = session.query(Friend).order_by(func.random()).first()
+    if settings.DATABASE == "sqlite":
+        data: list = session.query(Friend).order_by(func.random()).limit(num).all()
+    else:
+        data: list = session.query(Friend).order_by(func.rand()).limit(num).all()
     session.close()
+    friend_list_json = []
     if data:
-        itemlist = {
-            'name': data.name,
-            'link': data.link,
-            'avatar': data.avatar
-        }
+        for d in data:
+            itemlist = {
+                'name': d.name,
+                'link': d.link,
+                'avatar': d.avatar
+            }
+            friend_list_json.append(itemlist)
     else:
         # data为空直接返回
         return {"message": "not found"}
+    return friend_list_json[0] if len(friend_list_json) == 1 else friend_list_json
 
-    return itemlist
 
-
-def query_random_post():
+def query_random_post(num):
+    if num < 1:
+        return {"message": "param 'num' error"}
     session = db_init()
-    data: Post = session.query(Post).order_by(func.random()).first()
+    if settings.DATABASE == "sqlite":
+        data: list = session.query(Post).order_by(func.random()).limit(num).all()
+    else:
+        data: list = session.query(Post).order_by(func.rand()).limit(num).all()
     session.close()
+    post_list_json = []
     if data:
-        itemlist = {
-            "title": data.title,
-            "created": data.created,
-            "updated": data.updated,
-            "link": data.link,
-            "author": data.author,
-            "avatar": data.avatar,
-        }
+        for d in data:
+            itemlist = {
+                "title": d.title,
+                "created": d.created,
+                "updated": d.updated,
+                "link": d.link,
+                "author": d.author,
+                "avatar": d.avatar,
+            }
+            post_list_json.append(itemlist)
     else:
         # data为空直接返回
         return {"message": "not found"}
-    return itemlist
+    return post_list_json[0] if len(post_list_json) == 1 else post_list_json
 
 
 def query_post(link, num, rule, ):
@@ -172,6 +188,36 @@ def query_post(link, num, rule, ):
         return {"message": "not found"}
 
     return api_json
+
+
+def query_friend_status(days):
+    # 初始化数据库连接
+    session = db_init()
+    # 查询
+    posts = session.query(Post).all()
+    friends = session.query(Friend).all()
+    name_2_link_map = {user.name: user.link for user in friends}
+    friend_status = {
+        "total_friend_num": len(name_2_link_map),
+        "total_lost_num": 0,
+        "total_not_lost_num": 0,
+        "lost_friends": {},
+        "not_lost_friends": {},
+    }
+    not_lost_friends = {}
+    for i in posts:
+        if not time_compare(i.updated, days):
+            # 未超过指定天数，未失联
+            if name_2_link_map.get(i.author):
+                not_lost_friends[i.author] = name_2_link_map.pop(i.author)
+            else:
+                pass
+    # 统计信息更新，失联友链更新
+    friend_status["total_not_lost_num"] = len(not_lost_friends)
+    friend_status["total_lost_num"] = friend_status["total_friend_num"] - friend_status["total_not_lost_num"]
+    friend_status["not_lost_friends"] = not_lost_friends
+    friend_status["lost_friends"] = name_2_link_map
+    return friend_status
 
 
 def query_post_json(jsonlink, list, start, end, rule):
